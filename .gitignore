@@ -1,0 +1,7 @@
+__pycache__/
+.venv/
+trip_hub.sqlite3
+trip_hub.sqlite3-shm
+trip_hub.sqlite3-wal
+.streamlit/secrets.toml
+.env
