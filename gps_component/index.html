@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { margin:0; font-family:system-ui, sans-serif; color:var(--text-color, #222); }
+    .card { border:1px solid #8885; border-radius:10px; padding:10px; font-size:13px; }
+    button { border:0; border-radius:8px; padding:9px 12px; font-weight:600; cursor:pointer; background:#2563eb; color:white; }
+    .status { margin:0 0 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p class="status" id="status">Location sharing is off.</p>
+    <button id="toggle">Start sharing location</button>
+    <p id="hint">Keep this page open. Your browser may pause location updates in the background.</p>
+  </div>
+<script>
+(function() {
+  // Streamlit custom-component protocol. Values are sent to Python via setComponentValue.
+  function send(type, value) {
+    window.parent.postMessage({isStreamlitMessage:true, type:type, ...value}, "*");
+  }
+  function setFrameHeight(height) {
+    send("streamlit:setFrameHeight", {height:height});
+  }
+  function setValue(value) {
+    send("streamlit:setComponentValue", {value:value});
+  }
+  send("streamlit:componentReady", {apiVersion:1});
+  setFrameHeight(130);
+
+  const status = document.getElementById("status");
+  const button = document.getElementById("toggle");
+  let watchId = null;
+  let latest = null;
+
+  function onPosition(position) {
+    latest = {
+      lat: position.coords.latitude,
+      lon: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      speed: position.coords.speed,
+      heading: position.coords.heading,
+      observed_at: new Date().toISOString()
+    };
+    status.textContent = "🟢 GPS active • accuracy ±" + Math.round(position.coords.accuracy || 0) + " m";
+    setValue(latest);
+  }
+  function onError(error) {
+    const messages = {
+      1: "Location permission denied. Allow location in your browser settings.",
+      2: "Position unavailable. Move to an open area and retry.",
+      3: "GPS timed out. Waiting for another fix."
+    };
+    status.textContent = "🔴 " + (messages[error.code] || "Unable to get location.");
+  }
+  function start() {
+    if (!navigator.geolocation) {
+      status.textContent = "This browser does not support geolocation.";
+      return;
+    }
+    if (!window.isSecureContext) {
+      status.textContent = "GPS requires HTTPS. Open the deployed app using its HTTPS URL.";
+      return;
+    }
+    watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+      enableHighAccuracy:true, maximumAge:5000, timeout:15000
+    });
+    button.textContent = "Stop sharing location";
+    status.textContent = "Requesting location permission…";
+  }
+  function stop() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    button.textContent = "Start sharing location";
+    status.textContent = "Location sharing stopped. Remove your last shared point using the app sidebar if desired.";
+  }
+  button.addEventListener("click", function() {
+    if (watchId === null) start(); else stop();
+  });
+})();
+</script>
+</body>
+</html>
