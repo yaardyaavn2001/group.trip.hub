@@ -379,7 +379,7 @@ with map_tab:
                           icon=folium.Icon(color="red" if loc["member_id"] != member["id"] else "purple",
                                            icon="motorcycle" if loc["role"] == "Rider" else "user",
                                            prefix="fa")).add_to(fmap)
-        if locations:
+  if locations:
             coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]
             fmap.fit_bounds(coords, padding=(20, 20))
 st_folium(
