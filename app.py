@@ -256,7 +256,6 @@ with col_map:
         height=520,
         key="shared_trip_map",
         returned_objects=[],
-        returned_key=None,
     )
     st.caption("Distances shown are straight-line estimates, not road-route distances. Map tiles require internet access.")
 
