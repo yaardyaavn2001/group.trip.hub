@@ -14,7 +14,7 @@ from streamlit_folium import st_folium
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="Group Trip Hub",
+    page_title="Group Trip & Ride Manager",
     page_icon="🏍️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -67,6 +67,25 @@ def init_db():
                 PRIMARY KEY(trip_id, member_id)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS expenses (
+                id TEXT PRIMARY KEY,
+                trip_id TEXT NOT NULL,
+                member_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                amount REAL NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id TEXT PRIMARY KEY,
+                trip_id TEXT NOT NULL,
+                member_id TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 init_db()
@@ -113,7 +132,7 @@ def current_member():
     return query_one("SELECT * FROM members WHERE id = ? AND trip_id = ?", (st.session_state.member_id, st.session_state.trip_id))
 
 # Sidebar UI
-st.sidebar.title("🏍️ Group Trip Hub")
+st.sidebar.title("🏍️ Group Trip & Ride Manager")
 
 mem = current_member()
 trip = get_trip_by_id(st.session_state.get("trip_id")) if st.session_state.get("trip_id") else None
@@ -124,11 +143,11 @@ if not mem or not trip:
     
     with tab_create:
         with st.form("create_trip_form"):
-            trip_name = st.text_input("Trip Name", value="Malshej Ghat Ride")
+            trip_name = st.text_input("Trip Name", value="Sahyadri Range Ride")
             dest_lat = st.number_input("Destination Latitude", value=19.3248, format="%.4f")
             dest_lon = st.number_input("Destination Longitude", value=73.7578, format="%.4f")
             leader_name = st.text_input("Your Name", value="Leader")
-            bike_name = st.text_input("Your Bike / Vehicle", value="Bike / Scooter")
+            bike_name = st.text_input("Your Vehicle / Bike", value="Suzuki Access 125")
             submitted = st.form_submit_button("Create Trip")
             if submitted:
                 trip_id = secrets.token_urlsafe(12)
@@ -147,7 +166,7 @@ if not mem or not trip:
             invite_code = st.text_input("Invitation Code", max_chars=12).strip().upper()
             join_name = st.text_input("Your Name")
             join_role = st.selectbox("Your Role", ["Rider", "Pillion"])
-            join_bike = st.text_input("Bike / Assigned Rider (optional)")
+            join_bike = st.text_input("Vehicle / Bike Name (optional)")
             join_submitted = st.form_submit_button("Join Trip")
             if join_submitted:
                 t = get_trip_by_code(invite_code)
@@ -168,11 +187,11 @@ if not mem or not trip:
                         st.rerun()
     st.stop()
 
-# Main App Layout when joined
-st.sidebar.markdown(f"**Your profile**\n\n{mem['name']}\n\n*{mem['role']} · {mem['member_role']}*")
+# Sidebar UI when logged in
+st.sidebar.markdown(f"**Your Profile**\n\n{mem['name']}\n\n*{mem['role']} · {mem['member_role']}*")
 st.sidebar.markdown(f"**Trip:** {trip['name']}")
 st.sidebar.code(trip["invite_code"], language="text")
-st.sidebar.caption("Share this invitation code with your group.")
+st.sidebar.caption("Share this invitation code with riders.")
 
 if st.sidebar.button("🔄 Refresh trip data"):
     st.rerun()
@@ -183,8 +202,8 @@ if st.sidebar.button("🚪 Leave / switch trip"):
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📍 Share my location")
-st.sidebar.caption("Allow location access. Keep this page open for updates; phones may pause GPS when the page is in the background.")
+st.sidebar.markdown("### 📍 Share My Location")
+st.sidebar.caption("Keep this page active to broadcast live GPS coordinates.")
 
 # GPS component invocation
 gps_data = GPS_COMPONENT(key=f"gps_{mem['id']}")
@@ -203,85 +222,174 @@ if gps_data and isinstance(gps_data, dict):
                 updated_at = excluded.updated_at
         """, (trip["id"], mem["id"], lat, lon, acc, time.time()))
 
-# Main Body UI
-col_map, col_rank = st.columns([2, 1])
+# Main Dashboard Navigation Tabs
+tab_live, tab_rules, tab_budget, tab_alerts = st.tabs([
+    "🗺️ Live Map & Leaderboard", 
+    "📋 Rider & Pillion Instructions", 
+    "💰 Budget & Expenses", 
+    "🚨 Convoy Alerts"
+])
 
-with col_map:
-    st.markdown("### Map layer")
-    map_style = st.radio("Select layer", ["Satellite", "Street", "Light"], horizontal=True, label_visibility="collapsed")
-    
-    tile_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-    attr = "Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
-    if map_style == "Street":
-        tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attr = "&copy; OpenStreetMap contributors"
-    elif map_style == "Light":
-        tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
-        attr = "&copy; CARTO"
+with tab_live:
+    col_map, col_rank = st.columns([2, 1])
 
-    fmap = folium.Map(location=[trip["dest_lat"], trip["dest_lon"]], zoom_start=11, tiles=tile_url, attr=attr)
-    
-    # Destination marker
-    folium.Marker(
-        [trip["dest_lat"], trip["dest_lon"]],
-        popup="Destination",
-        tooltip="Destination",
-        icon=folium.Icon(color="green", icon="flag", prefix="fa")
-    ).add_to(fmap)
+    with col_map:
+        st.markdown("### Map Layer")
+        map_style = st.radio("Select layer", ["Satellite", "Street", "Light"], horizontal=True, label_visibility="collapsed")
+        
+        tile_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        attr = "Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP"
+        if map_style == "Street":
+            tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attr = "&copy; OpenStreetMap contributors"
+        elif map_style == "Light":
+            tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+            attr = "&copy; CARTO"
 
-    locations = query_all("SELECT * FROM locations WHERE trip_id = ?", (trip["id"],))
-    members = {m["id"]: m for m in get_members(trip["id"])}
-
-    for loc in locations:
-        m_info = members.get(loc["member_id"])
-        if not m_info:
-            continue
-        popup_text = f"<b>{m_info['name']}</b><br>{m_info['role']} ({m_info.get('bike_name', '')})"
-        icon_color = "red" if loc["member_id"] == mem["id"] else "purple"
-        icon_glyph = "motorcycle" if m_info["role"] == "Rider" else "user"
+        fmap = folium.Map(location=[trip["dest_lat"], trip["dest_lon"]], zoom_start=11, tiles=tile_url, attr=attr)
+        
+        # Destination marker
         folium.Marker(
-            [loc["lat"], loc["lon"]],
-            tooltip=m_info["name"],
-            popup=popup_text,
-            icon=folium.Icon(color=icon_color, icon=icon_glyph, prefix="fa")
+            [trip["dest_lat"], trip["dest_lon"]],
+            popup="Destination",
+            tooltip="Destination",
+            icon=folium.Icon(color="green", icon="flag", prefix="fa")
         ).add_to(fmap)
 
-    if locations:
-        coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]
-        fmap.fit_bounds(coords, padding=(20, 20))
+        locations = query_all("SELECT * FROM locations WHERE trip_id = ?", (trip["id"],))
+        members = {m["id"]: m for m in get_members(trip["id"])}
 
-    st_folium(
-        fmap,
-        use_container_width=True,
-        height=520,
-        key="shared_trip_map",
-        returned_objects=[],
-    )
-    st.caption("Distances shown are straight-line estimates, not road-route distances. Map tiles require internet access.")
-
-with col_rank:
-    st.subheader("🏁 Distance leaderboard")
-    if not locations:
-        st.info("No member has shared a GPS location yet.")
-    else:
-        ranking = []
-        now_ts = time.time()
         for loc in locations:
             m_info = members.get(loc["member_id"])
             if not m_info:
                 continue
-            dist = distance_km(loc["lat"], loc["lon"], trip["dest_lat"], trip["dest_lon"])
-            age = int(now_ts - loc["updated_at"])
-            ranking.append((dist, age, m_info, loc))
-        
-        ranking.sort(key=lambda x: x[0])
-        for idx, (dist, age, m_info, loc) in enumerate(ranking, 1):
-            status_color = "🟢" if age < 60 else ("🟡" if age < 300 else "🔴")
-            st.markdown(f"**#{idx} {m_info['name']}** · {status_color} {'recent' if age < 60 else f'{age}s ago'}")
-            st.caption(f"{dist:.2f} km straight-line to destination · updated {int(age/60)} min ago" if age >= 60 else f"{dist:.2f} km straight-line to destination · updated 0 min ago")
-            st.markdown("---")
+            popup_text = f"<b>{m_info['name']}</b><br>{m_info['role']} ({m_info.get('bike_name', '')})"
+            icon_color = "red" if loc["member_id"] == mem["id"] else "purple"
+            icon_glyph = "motorcycle" if m_info["role"] == "Rider" else "user"
+            folium.Marker(
+                [loc["lat"], loc["lon"]],
+                tooltip=m_info["name"],
+                popup=popup_text,
+                icon=folium.Icon(color=icon_color, icon=icon_glyph, prefix="fa")
+            ).add_to(fmap)
 
-st.markdown("### Members")
-for mid, m_info in members.items():
-    crown = "👑 " if m_info["member_role"] == "Leader" else "• "
-    st.markdown(f"{crown}**{m_info['name']}** — {m_info['role']} ({m_info.get('bike_name', 'No vehicle specified')})")
+        if locations:
+            coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]
+            fmap.fit_bounds(coords, padding=(20, 20))
+
+        st_folium(
+            fmap,
+            use_container_width=True,
+            height=520,
+            key="shared_trip_map",
+            returned_objects=[],
+        )
+        st.caption("Distances shown are straight-line estimates to destination.")
+
+    with col_rank:
+        st.subheader("🏁 Distance Leaderboard")
+        if not locations:
+            st.info("No members have shared GPS coordinates yet.")
+        else:
+            ranking = []
+            now_ts = time.time()
+            for loc in locations:
+                m_info = members.get(loc["member_id"])
+                if not m_info:
+                    continue
+                dist = distance_km(loc["lat"], loc["lon"], trip["dest_lat"], trip["dest_lon"])
+                age = int(now_ts - loc["updated_at"])
+                ranking.append((dist, age, m_info, loc))
+            
+            ranking.sort(key=lambda x: x[0])
+            for idx, (dist, age, m_info, loc) in enumerate(ranking, 1):
+                status_color = "🟢" if age < 60 else ("🟡" if age < 300 else "🔴")
+                st.markdown(f"**#{idx} {m_info['name']}** · {status_color} {'recent' if age < 60 else f'{age}s ago'}")
+                st.caption(f"{dist:.2f} km straight-line · updated {int(age/60)} min ago")
+                st.markdown("---")
+
+    st.markdown("### Trip Members")
+    for mid, m_info in members.items():
+        crown = "👑 " if m_info["member_role"] == "Leader" else "• "
+        st.markdown(f"{crown}**{m_info['name']}** — {m_info['role']} ({m_info.get('bike_name', 'No vehicle specified')})")
+
+with tab_rules:
+    st.subheader("📋 Standard Operating Procedures & Instructions")
+    
+    col_r, col_p = st.columns(2)
+    with col_r:
+        st.markdown("### 🏍️ For Riders")
+        st.markdown("""
+        * **Maintain Formation:** Keep a staggered riding formation on highways; single file on mountain switchbacks.
+        * **Lead & Sweep:** Never overtake the designated ride leader unless instructed. The sweep rider stays at the rear.
+        * **Fuel Checks:** Ensure fuel tanks are topped up before group departure.
+        * **Mirrors & Signals:** Check mirrors frequently and use clear hand/indicator signals for potholes, livestock, or stops.
+        """)
+    with col_p:
+        st.markdown("### 👥 For Pillions")
+        st.markdown("""
+        * **Body Posture:** Lean with the rider smoothly into corners; avoid sudden shifting of weight.
+        * **Hold Onto Rider / Grab Rails:** Maintain secure contact, especially on uneven terrain or unpaved roads.
+        * **Communication:** Agree on a simple tap signal on the rider's shoulder or helmet for breaks or discomfort.
+        * **Gear Up:** Always wear a proper helmet, jacket, and sturdy footwear.
+        """)
+
+with tab_budget:
+    st.subheader("💰 Trip Budget & Expense Splitting")
+    
+    with st.form("add_expense_form"):
+        st.markdown("#### Add New Expense")
+        exp_title = st.text_input("Expense Description (e.g., Breakfast at Wada, Fuel)")
+        exp_amount = st.number_input("Amount (₹)", min_value=0.0, step=50.0)
+        submitted_exp = st.form_submit_button("Add Expense")
+        if submitted_exp:
+            if exp_title.strip() and exp_amount > 0:
+                execute("INSERT INTO expenses (id, trip_id, member_id, title, amount, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (secrets.token_urlsafe(12), trip["id"], mem["id"], exp_title.strip(), exp_amount, now_iso()))
+                st.success("Expense added successfully!")
+                st.rerun()
+            else:
+                st.error("Please enter a valid title and amount.")
+
+    expenses = query_all("SELECT * FROM expenses WHERE trip_id = ?", (trip["id"],))
+    members_map = {m["id"]: m["name"] for m in get_members(trip["id"])}
+
+    if expenses:
+        total_spent = sum(e["amount"] for e in expenses)
+        total_members = len(members_map)
+        per_person = total_spent / total_members if total_members > 0 else 0
+
+        st.metric("Total Trip Expenditure", f"₹{total_spent:,.2f}", f"₹{per_person:,.2f} per person ({total_members} members)")
+        
+        st.markdown("#### Expense Log")
+        for e in expenses:
+            payer_name = members_map.get(e["member_id"], "Unknown")
+            st.markdown(f"* **{e['title']}**: ₹{e['amount']:,.2f} (Paid by **{payer_name}**)")
+    else:
+        st.info("No expenses recorded yet. Add your fuel, toll, or food expenses above!")
+
+with tab_alerts:
+    st.subheader("🚨 Convoy Alerts & Broadcasts")
+    
+    with st.form("send_alert_form"):
+        alert_msg = st.text_input("Broadcast Message (e.g., Puncture break at 2km mark, Regrouping ahead)")
+        submitted_alert = st.form_submit_button("Broadcast Alert")
+        if submitted_alert:
+            if alert_msg.strip():
+                execute("INSERT INTO alerts (id, trip_id, member_id, message, created_alt) VALUES (?, ?, ?, ?, ?)",
+                        (secrets.token_urlsafe(12), trip["id"], mem["id"], alert_msg.strip(), now_iso()))
+                st.success("Alert broadcasted to all members!")
+                st.rerun()
+            else:
+                st.error("Alert message cannot be empty.")
+
+    alerts = query_all("SELECT * FROM alerts WHERE trip_id = ? ORDER BY created_alt DESC", (trip["id"],))
+    members_map = {m["id"]: m["name"] for m in get_members(trip["id"])}
+
+    if alerts:
+        st.markdown("#### Recent Broadcasts")
+        for a in alerts:
+            sender = members_map.get(a["member_id"], "Unknown")
+            st.warning(f"**{sender}**: {a['message']}")
+    else:
+        st.info("No active emergency or convoy alerts.")
