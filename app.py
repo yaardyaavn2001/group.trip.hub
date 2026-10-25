@@ -382,7 +382,14 @@ with map_tab:
         if locations:
             coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]
             fmap.fit_bounds(coords, padding=(20, 20))
-        st_folium(fmap, width=None, height=520, key="shared_trip_map")
+st_folium(
+         fmap,
+         use_container_width=True,
+         height=520,
+         key="shared_trip_map",
+         returned_objects=[],
+         returned_key=None,
+     )
         st.caption("Distances shown are straight-line estimates, not road-route distances. Map tiles require internet access.")
     with col_rank:
         st.subheader("🏁 Distance leaderboard")
