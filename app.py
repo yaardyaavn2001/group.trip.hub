@@ -390,7 +390,7 @@ st_folium(
          returned_objects=[],
          returned_key=None,
      )
-        st.caption("Distances shown are straight-line estimates, not road-route distances. Map tiles require internet access.")
+st.caption("Distances shown are straight-line estimates, not road-route distances. Map tiles require internet access.")
     with col_rank:
         st.subheader("🏁 Distance leaderboard")
         if not locations:
