@@ -376,14 +376,14 @@ with tab_alerts:
         submitted_alert = st.form_submit_button("Broadcast Alert")
         if submitted_alert:
             if alert_msg.strip():
-                execute("INSERT INTO alerts (id, trip_id, member_id, message, created_alt) VALUES (?, ?, ?, ?, ?)",
+                execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
                         (secrets.token_urlsafe(12), trip["id"], mem["id"], alert_msg.strip(), now_iso()))
                 st.success("Alert broadcasted to all members!")
                 st.rerun()
             else:
                 st.error("Alert message cannot be empty.")
 
-    alerts = query_all("SELECT * FROM alerts WHERE trip_id = ? ORDER BY created_alt DESC", (trip["id"],))
+    alerts = query_all("SELECT * FROM alerts WHERE trip_id = ? ORDER BY created_at DESC", (trip["id"],))
     members_map = {m["id"]: m["name"] for m in get_members(trip["id"])}
 
     if alerts:
