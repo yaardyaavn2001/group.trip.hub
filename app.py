@@ -27,6 +27,28 @@ GPS_COMPONENT = components.declare_component(
     path=str(APP_DIR / "gps_component"),
 )
 
+# Screen Wake-Lock to keep mobile screens awake on handlebars
+components.html("""
+    <script>
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    const wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Screen Wake Lock is active');
+                }
+            } catch (err) {
+                console.error(`${err.name}, ${err.message}`);
+            }
+        }
+        requestWakeLock();
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                requestWakeLock();
+            }
+        });
+    </script>
+""", height=0)
+
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
@@ -189,6 +211,13 @@ if not mem or not trip:
 
 # Sidebar UI when logged in
 st.sidebar.markdown(f"**Your Profile**\n\n{mem['name']}\n\n*{mem['role']} · {mem['member_role']}*")
+
+# EMERGENCY SOS BUTTON IN SIDEBAR
+if st.sidebar.button("🚨 EMERGENCY SOS / BREAKDOWN", type="primary"):
+    execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
+            (secrets.token_urlsafe(12), trip["id"], mem["id"], f"🚨 EMERGENCY SOS TRIGGERED by {mem['name']}! Immediate assistance required.", now_iso()))
+    st.sidebar.error("SOS Alert Broadcasted to Convoy!")
+
 st.sidebar.markdown(f"**Trip:** {trip['name']}")
 st.sidebar.code(trip["invite_code"], language="text")
 st.sidebar.caption("Share this invitation code with riders.")
@@ -276,7 +305,6 @@ with tab_live:
                 icon=folium.Icon(color=icon_color, icon=icon_glyph, prefix="fa")
             ).add_to(fmap)
 
-        # Draw a direct route line from your current location to the destination on the map
         if my_current_loc:
             folium.PolyLine(
                 [my_current_loc, [trip["dest_lat"], trip["dest_lon"]]],
@@ -298,7 +326,6 @@ with tab_live:
             returned_objects=[],
         )
 
-        # Google Maps Turn-by-Turn Navigation Button
         gmaps_url = f"https://www.google.com/maps/dir/?api=1&destination={trip['dest_lat']},{trip['dest_lon']}&travelmode=driving"
         st.markdown(f"""
             <div style="text-align: center; margin: 12px 0;">
@@ -308,7 +335,7 @@ with tab_live:
             </div>
         """, unsafe_allow_html=True)
 
-        st.caption("Distances shown are straight-line estimates to destination. Click the button above for real-time voice & road navigation.")
+        st.caption("Distances shown are straight-line estimates to destination. Click above for real-time voice & road navigation.")
 
     with col_rank:
         st.subheader("🏁 Distance Leaderboard")
@@ -395,9 +422,35 @@ with tab_budget:
 with tab_alerts:
     st.subheader("🚨 Convoy Alerts & Broadcasts")
     
+    # ONE-TAP QUICK-REPLY BUTTONS FOR RIDERS
+    st.markdown("#### Quick Broadcast Buttons")
+    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
+    
+    with col_q1:
+        if st.button("☕ Tea / Rest Stop"):
+            execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (secrets.token_urlsafe(12), trip["id"], mem["id"], "☕ Requesting a tea / rest stop ahead.", now_iso()))
+            st.rerun()
+    with col_q2:
+        if st.button("⛽ Low Fuel"):
+            execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (secrets.token_urlsafe(12), trip["id"], mem["id"], "⛽ Low fuel warning / Need fuel station stop.", now_iso()))
+            st.rerun()
+    with col_q3:
+        if st.button("🔧 Puncture / Issue"):
+            execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (secrets.token_urlsafe(12), trip["id"], mem["id"], "🔧 Mechanical breakdown / Puncture. Stop & assist.", now_iso()))
+            st.rerun()
+    with col_q4:
+        if st.button("🐢 Regroup / Slow"):
+            execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (secrets.token_urlsafe(12), trip["id"], mem["id"], "🐢 Slow down / Need to regroup convoy.", now_iso()))
+            st.rerun()
+
+    st.markdown("---")
     with st.form("send_alert_form"):
-        alert_msg = st.text_input("Broadcast Message (e.g., Puncture break at 2km mark, Regrouping ahead)")
-        submitted_alert = st.form_submit_button("Broadcast Alert")
+        alert_msg = st.text_input("Custom Broadcast Message")
+        submitted_alert = st.form_submit_button("Broadcast Custom Alert")
         if submitted_alert:
             if alert_msg.strip():
                 execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -411,9 +464,12 @@ with tab_alerts:
     members_map = {m["id"]: m["name"] for m in get_members(trip["id"])}
 
     if alerts:
-        st.markdown("#### Recent Broadcasts")
+        st.markdown("#### Recent Broadcasts & SOS Alerts")
         for a in alerts:
             sender = members_map.get(a["member_id"], "Unknown")
-            st.warning(f"**{sender}**: {a['message']}")
+            if "EMERGENCY" in a["message"]:
+                st.error(f"**{sender}**: {a['message']}")
+            else:
+                st.warning(f"**{sender}**: {a['message']}")
     else:
         st.info("No active emergency or convoy alerts.")
