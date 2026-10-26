@@ -259,10 +259,13 @@ with tab_live:
         locations = query_all("SELECT * FROM locations WHERE trip_id = ?", (trip["id"],))
         members = {m["id"]: m for m in get_members(trip["id"])}
 
+        my_current_loc = None
         for loc in locations:
             m_info = members.get(loc["member_id"])
             if not m_info:
                 continue
+            if loc["member_id"] == mem["id"]:
+                my_current_loc = (loc["lat"], loc["lon"])
             popup_text = f"<b>{m_info['name']}</b><br>{m_info['role']} ({m_info.get('bike_name', '')})"
             icon_color = "red" if loc["member_id"] == mem["id"] else "purple"
             icon_glyph = "motorcycle" if m_info["role"] == "Rider" else "user"
@@ -271,6 +274,16 @@ with tab_live:
                 tooltip=m_info["name"],
                 popup=popup_text,
                 icon=folium.Icon(color=icon_color, icon=icon_glyph, prefix="fa")
+            ).add_to(fmap)
+
+        # Draw a direct route line from your current location to the destination on the map
+        if my_current_loc:
+            folium.PolyLine(
+                [my_current_loc, [trip["dest_lat"], trip["dest_lon"]]],
+                color="#2563eb",
+                weight=4,
+                opacity=0.8,
+                tooltip="Direct Route to Destination"
             ).add_to(fmap)
 
         if locations:
@@ -284,7 +297,18 @@ with tab_live:
             key="shared_trip_map",
             returned_objects=[],
         )
-        st.caption("Distances shown are straight-line estimates to destination.")
+
+        # Google Maps Turn-by-Turn Navigation Button
+        gmaps_url = f"https://www.google.com/maps/dir/?api=1&destination={trip['dest_lat']},{trip['dest_lon']}&travelmode=driving"
+        st.markdown(f"""
+            <div style="text-align: center; margin: 12px 0;">
+                <a href="{gmaps_url}" target="_blank" style="background-color: #1a73e8; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                    🧭 Open Turn-by-Turn Navigation in Google Maps
+                </a>
+            </div>
+        """, unsafe_allow_html=True)
+
+        st.caption("Distances shown are straight-line estimates to destination. Click the button above for real-time voice & road navigation.")
 
     with col_rank:
         st.subheader("🏁 Distance Leaderboard")
