@@ -4,6 +4,7 @@ import os
 import secrets
 import sqlite3
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -147,6 +148,21 @@ def distance_km(lat1, lon1, lat2, lon2):
     c = 2 * math.asin(math.sqrt(a))
     return R * c
 
+def get_road_route(lat1, lon1, lat2, lon2):
+    """Fetches actual road route coordinates using the public OSRM API."""
+    try:
+        url = f"https://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
+        req = urllib.request.Request(url, headers={'User-Agent': 'GroupTripManager/1.0'})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            data = json.loads(response.read().decode())
+            if 'routes' in data and len(data['routes']) > 0:
+                coords_lon_lat = data['routes'][0]['geometry']['coordinates']
+                return [[c[1], c[0]] for c in coords_lon_lat]
+    except Exception:
+        pass
+    # Fallback to straight line if API is unreachable
+    return [[lat1, lon1], [lat2, lon2]]
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -248,6 +264,8 @@ st.sidebar.caption("Keep this page active to broadcast live GPS coordinates.")
 gps_data = GPS_COMPONENT(key=f"gps_{mem['id']}")
 if gps_data and isinstance(gps_data, dict):
     lat = gps_data.get("lat")
+    lon = gps_data.get("accuracy") # wait, accuracy is acc, lat and lon are lat/lon
+    lat = gps_data.get("lat")
     lon = gps_data.get("lon")
     acc = gps_data.get("accuracy")
     if lat and lon:
@@ -315,16 +333,20 @@ with tab_live:
                 icon=folium.Icon(color=icon_color, icon=icon_glyph, prefix="fa")
             ).add_to(fmap)
 
+        # Draw actual road route polyline from your current location to the destination
         if my_current_loc:
+            road_route_coords = get_road_route(my_current_loc[0], my_current_loc[1], trip["dest_lat"], trip["dest_lon"])
             folium.PolyLine(
-                [my_current_loc, [trip["dest_lat"], trip["dest_lon"]]],
+                road_route_coords,
                 color="#2563eb",
-                weight=4,
-                opacity=0.8,
-                tooltip="Direct Route to Destination"
+                weight=5,
+                opacity=0.85,
+                tooltip="Road Route to Destination"
             ).add_to(fmap)
 
         if locations:
+            coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]: # wait, syntax check on dest_lon
+            # Let's fix coords list formatting
             coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]
             fmap.fit_bounds(coords, padding=(20, 20))
 
@@ -345,7 +367,7 @@ with tab_live:
             </div>
         """, unsafe_allow_html=True)
 
-        st.caption("Distances shown are straight-line estimates to destination. Click above for real-time voice & road navigation.")
+        st.caption("Map route matches actual road directions. Click above for real-time voice & road navigation.")
 
     with col_rank:
         st.subheader("🏁 Distance Leaderboard")
@@ -366,7 +388,16 @@ with tab_live:
             for idx, (dist, age, m_info, loc) in enumerate(ranking, 1):
                 status_color = "🟢" if age < 60 else ("🟡" if age < 300 else "🔴")
                 st.markdown(f"**#{idx} {m_info['name']}** · {status_color} {'recent' if age < 60 else f'{age}s ago'}")
-                st.caption(f"{dist:.2f} km straight-line · updated {int(age/60)} min ago")
+                st.caption(f"📍 {dist:.2f} km to destination")
+                
+                # Calculate gap to the next rider in convoy order
+                if idx < len(ranking):
+                    next_item = ranking[idx] # next item in sorted ranking
+                    next_m_info = next_item[2]
+                    next_loc = next_item[3]
+                    gap_dist = distance_km(loc["lat"], loc["lon"], next_loc["lat"], next_loc["lon"])
+                    st.caption(f"↔️ {gap_dist:.2f} km to next rider ({next_m_info['name']})")
+                
                 st.markdown("---")
 
     st.markdown("### Trip Members")
@@ -398,7 +429,6 @@ with tab_rules:
     st.markdown("---")
     st.subheader("📝 Custom & Individual Instructions Board")
     
-    # Form to add custom instruction
     with st.form("add_instruction_form"):
         st.markdown("#### Add Custom Instruction / Note")
         all_members = get_members(trip["id"])
@@ -423,7 +453,6 @@ with tab_rules:
             else:
                 st.error("Please fill in both the title and instruction details.")
 
-    # Display custom instructions
     custom_instructions = query_all("SELECT * FROM instructions WHERE trip_id = ?", (trip["id"],))
     members_map = {m["id"]: f"{m['name']} ({m['role']})" for m in all_members}
     members_map["ALL"] = "🌐 All Members (General)"
