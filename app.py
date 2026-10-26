@@ -108,6 +108,17 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS instructions (
+                id TEXT PRIMARY KEY,
+                trip_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 init_db()
@@ -212,7 +223,6 @@ if not mem or not trip:
 # Sidebar UI when logged in
 st.sidebar.markdown(f"**Your Profile**\n\n{mem['name']}\n\n*{mem['role']} · {mem['member_role']}*")
 
-# EMERGENCY SOS BUTTON IN SIDEBAR
 if st.sidebar.button("🚨 EMERGENCY SOS / BREAKDOWN", type="primary"):
     execute("INSERT INTO alerts (id, trip_id, member_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
             (secrets.token_urlsafe(12), trip["id"], mem["id"], f"🚨 EMERGENCY SOS TRIGGERED by {mem['name']}! Immediate assistance required.", now_iso()))
@@ -369,7 +379,7 @@ with tab_rules:
     
     col_r, col_p = st.columns(2)
     with col_r:
-        st.markdown("### 🏍️ For Riders")
+        st.markdown("### 🏍️ For Riders (Default SOP)")
         st.markdown("""
         * **Maintain Formation:** Keep a staggered riding formation on highways; single file on mountain switchbacks.
         * **Lead & Sweep:** Never overtake the designated ride leader unless instructed. The sweep rider stays at the rear.
@@ -377,13 +387,54 @@ with tab_rules:
         * **Mirrors & Signals:** Check mirrors frequently and use clear hand/indicator signals for potholes, livestock, or stops.
         """)
     with col_p:
-        st.markdown("### 👥 For Pillions")
+        st.markdown("### 👥 For Pillions (Default SOP)")
         st.markdown("""
         * **Body Posture:** Lean with the rider smoothly into corners; avoid sudden shifting of weight.
         * **Hold Onto Rider / Grab Rails:** Maintain secure contact, especially on uneven terrain or unpaved roads.
         * **Communication:** Agree on a simple tap signal on the rider's shoulder or helmet for breaks or discomfort.
         * **Gear Up:** Always wear a proper helmet, jacket, and sturdy footwear.
         """)
+
+    st.markdown("---")
+    st.subheader("📝 Custom & Individual Instructions Board")
+    
+    # Form to add custom instruction
+    with st.form("add_instruction_form"):
+        st.markdown("#### Add Custom Instruction / Note")
+        all_members = get_members(trip["id"])
+        member_options = {"🌐 ALL MEMBERS (General)": "ALL"}
+        for m in all_members:
+            member_options[f"{m['name']} ({m['role']})"] = m['id']
+            
+        target_choice = st.selectbox("Assign To", options=list(member_options.keys()))
+        inst_title = st.text_input("Instruction Title (e.g., Carry Extra Water, Lead Pacing)")
+        inst_content = st.text_area("Instruction Details")
+        
+        submitted_inst = st.form_submit_button("Post Instruction")
+        if submitted_inst:
+            if inst_title.strip() and inst_content.strip():
+                target_id = member_options[target_choice]
+                execute("""
+                    INSERT INTO instructions (id, trip_id, target_id, title, content, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (secrets.token_urlsafe(12), trip["id"], target_id, inst_title.strip(), inst_content.strip(), mem["name"], now_iso()))
+                st.success("Instruction posted successfully!")
+                st.rerun()
+            else:
+                st.error("Please fill in both the title and instruction details.")
+
+    # Display custom instructions
+    custom_instructions = query_all("SELECT * FROM instructions WHERE trip_id = ?", (trip["id"],))
+    members_map = {m["id"]: f"{m['name']} ({m['role']})" for m in all_members}
+    members_map["ALL"] = "🌐 All Members (General)"
+
+    if custom_instructions:
+        st.markdown("#### Posted Instructions & Notes")
+        for inst in custom_instructions:
+            assigned_to = members_map.get(inst["target_id"], "Unknown")
+            st.info(f"**📌 {inst['title']}** (Assigned to: *{assigned_to}* by **{inst['created_by']}**)\n\n{inst['content']}")
+    else:
+        st.info("No custom instructions posted yet. Use the form above to assign notes for everyone or specific members!")
 
 with tab_budget:
     st.subheader("💰 Trip Budget & Expense Splitting")
@@ -422,7 +473,6 @@ with tab_budget:
 with tab_alerts:
     st.subheader("🚨 Convoy Alerts & Broadcasts")
     
-    # ONE-TAP QUICK-REPLY BUTTONS FOR RIDERS
     st.markdown("#### Quick Broadcast Buttons")
     col_q1, col_q2, col_q3, col_q4 = st.columns(4)
     
