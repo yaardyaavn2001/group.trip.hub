@@ -160,7 +160,6 @@ def get_road_route(lat1, lon1, lat2, lon2):
                 return [[c[1], c[0]] for c in coords_lon_lat]
     except Exception:
         pass
-    # Fallback to straight line if API is unreachable
     return [[lat1, lon1], [lat2, lon2]]
 
 def now_iso():
@@ -264,8 +263,6 @@ st.sidebar.caption("Keep this page active to broadcast live GPS coordinates.")
 gps_data = GPS_COMPONENT(key=f"gps_{mem['id']}")
 if gps_data and isinstance(gps_data, dict):
     lat = gps_data.get("lat")
-    lon = gps_data.get("accuracy") # wait, accuracy is acc, lat and lon are lat/lon
-    lat = gps_data.get("lat")
     lon = gps_data.get("lon")
     acc = gps_data.get("accuracy")
     if lat and lon:
@@ -333,7 +330,6 @@ with tab_live:
                 icon=folium.Icon(color=icon_color, icon=icon_glyph, prefix="fa")
             ).add_to(fmap)
 
-        # Draw actual road route polyline from your current location to the destination
         if my_current_loc:
             road_route_coords = get_road_route(my_current_loc[0], my_current_loc[1], trip["dest_lat"], trip["dest_lon"])
             folium.PolyLine(
@@ -345,8 +341,6 @@ with tab_live:
             ).add_to(fmap)
 
         if locations:
-            coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]: # wait, syntax check on dest_lon
-            # Let's fix coords list formatting
             coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]
             fmap.fit_bounds(coords, padding=(20, 20))
 
@@ -390,9 +384,8 @@ with tab_live:
                 st.markdown(f"**#{idx} {m_info['name']}** · {status_color} {'recent' if age < 60 else f'{age}s ago'}")
                 st.caption(f"📍 {dist:.2f} km to destination")
                 
-                # Calculate gap to the next rider in convoy order
                 if idx < len(ranking):
-                    next_item = ranking[idx] # next item in sorted ranking
+                    next_item = ranking[idx]
                     next_m_info = next_item[2]
                     next_loc = next_item[3]
                     gap_dist = distance_km(loc["lat"], loc["lon"], next_loc["lat"], next_loc["lon"])
