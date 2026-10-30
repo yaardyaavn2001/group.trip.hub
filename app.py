@@ -207,6 +207,7 @@ if not mem or not trip:
                         (member_id, trip_id, leader_name, "Rider", bike_name, "Leader", now_iso()))
                 st.session_state.trip_id = trip_id
                 st.session_state.member_id = member_id
+                st.session_state.map_center = [dest_lat, dest_lon]
                 st.rerun()
 
     with tab_join:
@@ -225,15 +226,23 @@ if not mem or not trip:
                 else:
                     existing = query_one("SELECT * FROM members WHERE trip_id = ? AND lower(name) = lower(?)", (t["id"], join_name.strip()))
                     if existing:
-                        st.error("A member with that name already exists in this trip.")
+                        st.session_state.trip_id = t["id"]
+                        st.session_state.member_id = existing["id"]
+                        st.session_state.map_center = [t["dest_lat"], t["dest_lon"]]
+                        st.rerun()
                     else:
                         member_id = secrets.token_urlsafe(18)
                         execute("INSERT INTO members (id, trip_id, name, role, bike_name, member_role, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                                 (member_id, t["id"], join_name.strip(), join_role, join_bike, "Member", now_iso()))
                         st.session_state.trip_id = t["id"]
                         st.session_state.member_id = member_id
+                        st.session_state.map_center = [t["dest_lat"], t["dest_lon"]]
                         st.rerun()
     st.stop()
+
+# Initialize map center state if not present
+if "map_center" not in st.session_state and trip:
+    st.session_state.map_center = [trip["dest_lat"], trip["dest_lon"]]
 
 # Sidebar UI when logged in
 st.sidebar.markdown(f"**Your Profile**\n\n{mem['name']}\n\n*{mem['role']} · {mem['member_role']}*")
@@ -253,6 +262,7 @@ if st.sidebar.button("🔄 Refresh trip data"):
 if st.sidebar.button("🚪 Leave / switch trip"):
     st.session_state.pop("trip_id", None)
     st.session_state.pop("member_id", None)
+    st.session_state.pop("map_center", None)
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -288,7 +298,23 @@ with tab_live:
     col_map, col_rank = st.columns([2, 1])
 
     with col_map:
-        st.markdown("### Map Layer")
+        st.markdown("### Map Controls & Layer")
+        
+        # MAP CONTROL BUTTONS (Google Maps style)
+        b_col1, b_col2, b_col3 = st.columns(3)
+        with b_col1:
+            if st.button("📍 Recenter to My Location"):
+                my_loc = query_one("SELECT lat, lon FROM locations WHERE trip_id = ? AND member_id = ?", (trip["id"], mem["id"]))
+                if my_loc:
+                    st.session_state.map_center = [my_loc["lat"], my_loc["lon"]]
+                    st.rerun()
+                else:
+                    st.toast("Your GPS location is not available yet.")
+        with b_col2:
+            if st.button("🎯 Center on Destination"):
+                st.session_state.map_center = [trip["dest_lat"], trip["dest_lon"]]
+                st.rerun()
+
         map_style = st.radio("Select layer", ["Satellite", "Street", "Light"], horizontal=True, label_visibility="collapsed")
         
         tile_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -300,7 +326,9 @@ with tab_live:
             tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
             attr = "&copy; CARTO"
 
-        fmap = folium.Map(location=[trip["dest_lat"], trip["dest_lon"]], zoom_start=11, tiles=tile_url, attr=attr)
+        # Use current session map center
+        center_coords = st.session_state.get("map_center", [trip["dest_lat"], trip["dest_lon"]])
+        fmap = folium.Map(location=center_coords, zoom_start=13, tiles=tile_url, attr=attr)
         
         # Destination marker
         folium.Marker(
@@ -340,14 +368,10 @@ with tab_live:
                 tooltip="Road Route to Destination"
             ).add_to(fmap)
 
-        if locations:
-            coords = [[x["lat"], x["lon"]] for x in locations] + [[trip["dest_lat"], trip["dest_lon"]]]
-            fmap.fit_bounds(coords, padding=(20, 20))
-
         st_folium(
             fmap,
             use_container_width=True,
-            height=520,
+            height=500,
             key="shared_trip_map",
             returned_objects=[],
         )
